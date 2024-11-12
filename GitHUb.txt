@@ -1,0 +1,190 @@
+#Add Atom to path to use pull function
+import sys
+sys.path.append(r'C:\Users\MDHI.admin\Documents\Atom')
+
+import pandas as pd
+import numpy as np
+from datetime import date
+from Pull import pull
+
+nan = np.float64('nan')
+
+#Pull alias fields to rename cols
+aliases = pd.read_excel(r'C:\Users\MDHI.admin\Documents\Atom\DataSource Scripts\Field Aliases.xlsx')
+col_names = dict(zip(aliases.default,aliases.alias))
+
+#define dates for pull
+# start = date(2019,1,1)
+# end = date.today()
+# years = [*range(start.year, end.year+2)]
+# years = [str(x) for x in years]
+
+# dates = []
+# for i in range(len(years)-1):
+#     date = years[i] + '-01-01 to ' + years[i+1] + '-01-01'
+#     dates.append(date)
+
+#Define Pull
+model = 'base'
+
+fields_half1 = ["enrollments.id",
+        "enrollments.ref_household",
+        "household_makeup.household_type",
+        "clients.unique_identifier",
+        "programs.id",
+        "programs.name",
+        "programs.project_type_code",
+        "programs.tracking_method",
+        "agencies.id",
+        "agencies.name",
+        "enrollments.ref_user",
+        "enrollments.ref_user_updated"
+]
+fields_half2 = [
+        "enrollments.id",
+        "hoh_client_location.hoh_client_location",
+        "enrollments.start_date",
+        "enrollments.end_date",
+        "enrollments.still_in_program",
+        "enrollments.days_since_start",
+        "household_move_in_date.move_in_date",
+        "entry_custom.c_sw_ZIP_housed_zipcode",
+        "entry_screen.age",
+        "clients.age",
+        "chronically_homeless_at_entry.is_chronic_homeless",
+        "chronically_homeless_households.is_chronic_homeless_household"
+]
+fields_half3 = [
+        "enrollments.id",
+        "entry_screen.disabling_condition",
+        "last_screen.exit_destination_text",
+        "last_screen.rental_subsidy_type",
+        "last_screen.exit_destination_other",
+        "last_screen.housed_on_exit",
+        "last_screen.exit_destination_category",
+        "last_screen.is_autoexited"
+]
+fields_half4 = [
+        "enrollments.id",
+        "client_first_system_enrollment.is_first_system_enrollment",
+        "client_first_enrollment_by_type.is_first_enrollment_by_type",
+        "client_first_program.is_first_enrollment",
+        "client_last_system_program_enrollment.is_latest_system_enrollment",
+        "client_last_enrollment_by_type.is_latest_enrollment_by_type",
+        "client_last_program.is_latest_enrollment"]
+
+#create final dataframe (empty)
+df = pd.DataFrame()
+
+#pull report for each date range & append to final 
+# for date in dates:
+#     filters = {"enrollments.date_filter" : date}
+#     temp = pull(fields,filters,model)
+#     df = df.append(temp)
+
+
+
+# Create final dataframe (empty)
+df_half1 = pd.DataFrame()
+df_half2 = pd.DataFrame()
+df_half3 = pd.DataFrame()
+df_half4 = pd.DataFrame()
+
+# Pull report for each date range & append to final
+filters = {"enrollments.date_filter": "2019-01-01 to today"}
+temp1 = pull(fields_half1, filters, model)
+temp2 = pull(fields_half2, filters, model)
+temp3 = pull(fields_half3, filters, model)
+temp4 = pull(fields_half4, filters, model)
+
+df_half1 = pd.concat([df_half1, temp1])
+df_half2 = pd.concat([df_half2, temp2])
+df_half3 = pd.concat([df_half3, temp3])
+df_half4 = pd.concat([df_half4, temp4])
+
+
+df_half1.drop_duplicates(inplace=True)
+df_half2.drop_duplicates(inplace=True)
+df_half3.drop_duplicates(inplace=True)
+df_half4.drop_duplicates(inplace=True)
+
+# Check if columns are present before merging
+if 'Enrollments Enrollment ID' in df_half1.columns and 'Enrollments Enrollment ID' in df_half2.columns:
+    # Merge df_half1 and df_half2
+    df_temp = df_half1.merge(df_half2, on="Enrollments Enrollment ID", how="outer")
+    df_temp2 = df_temp.merge(df_half3, on="Enrollments Enrollment ID", how="outer")
+
+# Merge the result with df_half3
+    df = df_temp2.merge(df_half4, on="Enrollments Enrollment ID", how="outer")
+    df.drop_duplicates(inplace=True)
+    # Save df to CSV after merging halves
+    df.to_csv(r'C:\Users\MDHI.admin\Documents\Atom\Test Jeevan\CoreEnrollments_Datasets\CoreEnrollments_df.csv', index=False)
+else:
+    raise ValueError("The column 'enrollments.id' is missing from one of the DataFrames")
+
+
+def make_id(IDs):
+    allID = ''
+    IDs = sorted(IDs)
+    for ID in IDs:
+        allID += ID
+
+    out = ''.join(allID)
+
+    return out
+
+def define_hhs (row):
+    if row['Adult'] > 0 and row['Youth'] == 0 and row['Indeterminable'] == 0:
+        return 'Adult'
+    if row['Adult'] == 0 and row['Youth'] > 0 and row['Indeterminable'] == 0:
+        return 'Youth'
+    if row['Adult'] > 0 and row['Youth'] > 0:
+        return 'Family'
+    if (row['Adult'] > 0 and row['Youth'] == 0 and row['Indeterminable'] > 0) or\
+        (row['Adult'] == 0 and row['Youth'] > 0 and row['Indeterminable'] > 0) or\
+        (row['Adult'] == 0 and row['Youth'] == 0 and row['Indeterminable'] > 0):
+        return 'Indeterminable'
+
+def unique_hh(df):
+    nan = np.float64('nan')
+    df['StringHousehold'] = df['Enrollments Household ID'].replace(np.nan, 999999).apply(lambda x: str(int(x)))
+    df['StringID'] = df['Clients Unique Identifier'].replace(np.nan, 888888888).apply(lambda x: ('000000000' + str(x))[-9:])
+    dfnew = df.groupby('StringHousehold')['StringID'].apply(list).reset_index()
+
+    dfnew['HouseholdUniqueIdentifier'] = dfnew.StringID.apply(make_id)
+
+    dfnew.drop(columns='StringID', inplace=True)
+
+    dfnew.rename(columns={'StringHousehold' : 'Enrollments Household ID'}, inplace=True)
+    output = dfnew.copy()
+    output['Enrollments Household ID'] = output['Enrollments Household ID'].astype(int)
+    return output
+
+hid_out = unique_hh(df)
+
+hid_out['Enrollments Household ID'] = hid_out['Enrollments Household ID'].apply(lambda x: int(x) if pd.notnull(x) else np.nan)
+
+out = df.merge(hid_out, on = "Enrollments Household ID", how = 'left')
+
+out['Clients Current Age'] = out['Clients Current Age'].replace(nan,-99)
+conditions = [out['Clients Current Age']==-99, out['Clients Current Age']<=24, out['Clients Current Age']>24]
+choices = ['Indeterminable','Youth','Adult']
+out['Client Type'] = np.select(conditions, choices)
+
+hh_info = out[['HouseholdUniqueIdentifier','Clients Unique Identifier','Client Type']].drop_duplicates()
+hh_info = pd.crosstab(hh_info['HouseholdUniqueIdentifier'],hh_info['Client Type'])
+
+hh_info['Household Type Calculated'] = hh_info.apply (lambda row: define_hhs(row), axis=1)
+hh_info.rename(columns={'Adult':'Count Adults',
+                        'Indeterminable':'Count Indeterminable',
+                        'Youth':'Count Youth'}, inplace=True)
+
+out = out.merge(hh_info, on='HouseholdUniqueIdentifier', how='left')
+out.drop(columns=['Clients Current Age','StringHousehold', 'StringID'], inplace=True)
+
+#Rename Cols
+out.rename(columns=col_names, inplace=True)
+
+#Save to Destination
+out.to_csv(r'C:\Users\MDHI.admin\Metro Denver Homeless Initiative\MDHI Internal - HMIS\Reporting\Tableau\New DataSets\Enrollments.csv', index=False)
+out.to_csv(r'C:\Users\MDHI.admin\Metro Denver Homeless Initiative\COHMIS Statewide Collaborative - Automation\Statewide Datasets\Enrollments.csv', index=False)
